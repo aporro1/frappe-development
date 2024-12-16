@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  frappe:
+    build: .
+    ports:
+      - "8000-8005:8000-8005"
+      - "9000-9005:9000-9005"
+    volumes:
+      - ./frappe-bench:/home/frappe/frappe-bench
+    environment:
+      - POSTGRES_PASSWORD=123  # Change this in production
+      - POSTGRES_HOST=postgres
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=123  # Change this in production
+      - POSTGRES_USER=frappe
+      - POSTGRES_DB=frappe
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres-data:
+
+### entrypoint.sh
+#!/bin/bash
+
+# Start Redis
+sudo service redis-server start
+
+# Wait for PostgreSQL to be ready
+until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U frappe -d frappe -c '\q'; do
+  echo "Postgres is unavailable - sleeping"
+  sleep 1
+done
+
+# Initialize bench if not already initialized
+if [ ! -d "frappe-bench" ]; then
+    bench init frappe-bench --skip-redis-config-generation
+    cd frappe-bench
+    
+    # Configure bench to use PostgreSQL
+    bench set-config -g db_host postgres
+    bench set-config -g db_port 5432
+    bench set-config -g db_user frappe
+    bench set-config -g db_password $POSTGRES_PASSWORD
+    bench set-config -g redis_cache redis://redis:6379
+    bench set-config -g redis_queue redis://redis:6379
+    bench set-config -g redis_socketio redis://redis:6379
+    
+    bench start
+else
+    cd frappe-bench
+    bench start
+fi
